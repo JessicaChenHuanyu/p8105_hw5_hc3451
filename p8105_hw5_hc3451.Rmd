@@ -6,12 +6,94 @@ output: github_document
 ---
 
 ```{r setup, include=FALSE}
-library(tibble)
+library(purrr)
 library(broom)
+library(tibble)
 library(tidyverse)
 library(ggplot2)
 set.seed(1)
 ```
+
+# Problem 1
+## Baltimore
+```{r}
+homicide = read.csv("./homicide-data.csv")
+```
+The raw data contains 52179 observations of 12 variables.
+
+```{r}
+homicide = homicide |>
+  mutate(city_state = paste0(city,', ',state))
+
+homicide_summary = homicide |>
+  group_by(city_state) |>
+  summarise(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
+  )
+homicide_summary
+```
+
+```{r}
+baltimore = homicide_summary |>
+  filter(city_state == "Baltimore, MD")
+prop_balti = prop.test(pull(baltimore,unsolved_homicides), pull(baltimore,total_homicides),
+          alternative = "two.sided",
+          conf.level = 0.95, correct = TRUE) 
+save(prop_balti, file = "results/unsolved_homicides_proportion.RData")
+prop_tidy = broom::tidy(prop_balti)
+
+tidy_frame = data.frame(
+  city = 'Baltimore, MD',
+  estimate_prop = round(as.numeric(pull(prop_tidy, estimate[1])), 3),
+  confidenct_interval = paste0("(", round(pull(prop_tidy, conf.low), 3),
+                               ",", round(pull(prop_tidy, conf.high), 3), ")")
+  )
+print(tidy_frame)
+```
+
+## Each City
+```{r}
+prop_city = function(city) {
+  homi_city = homicide_summary |>
+    filter(city_state == city)
+  
+  prop_city = prop.test(pull(homi_city, unsolved_homicides), pull(homi_city, total_homicides),
+                   alternative = "two.sided",
+                   conf.level = 0.95, correct = TRUE)
+  prop_city_tidy = broom::tidy(prop_city)
+  
+  lower_ci = round(pull(prop_city_tidy, conf.low), 3)
+  upper_ci = round(pull(prop_city_tidy, conf.high), 3)
+  return(data.frame(estimate_prop = round(as.numeric(pull(prop_city_tidy, estimate[1])), 3),
+                    lower_ci = lower_ci,
+                    upper_ci = upper_ci,
+                    confidenct_interval = paste0("(", lower_ci, ",", upper_ci, ")"))
+  )
+}
+
+all_cities = data.frame(city_state = unique(pull(homicide_summary, city_state)))
+result_df = all_cities |>
+  mutate(result = map(city_state, prop_city)) |>
+  unnest(result) |>
+  select(city_state, estimate_prop, confidenct_interval)
+print(result_df)
+```
+
+## Graph
+```{r}
+all_cities |>
+  mutate(result = map(city_state, prop_city)) |>
+  unnest(result) |>
+  ggplot(aes(group = city_state, x = reorder(city_state, estimate_prop))) +
+  geom_point(aes(y = estimate_prop)) +
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci)) +
+  labs(x = "Estimated Proportion (with 95% CI)", y = "City",
+       title = "Estimated Proportion for Each City") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+# Problem 2
 
 # Problem 3
 ## (1) mu = 0
@@ -90,4 +172,5 @@ ggplot(sim_t_result_2, aes(x = mu_values, y = estimate)) +
   labs(x = "True Value of Mean", y = "Average Estimate of Mean (when null was rejected)") +
   ggtitle("Average Estimate of Mean (when null was rejected) vs. True Value of Mean")
 ```
+
 The sample average of mean across tests for which the null is rejected is not approximately equal to the true value of mean. By this way, the null will be rejected under the confidence interval.
